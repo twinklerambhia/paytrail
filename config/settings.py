@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'corsheaders',
     'merchants',
     'payments',
     'devices',
@@ -54,6 +55,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -148,7 +150,64 @@ MAILERS = {
 
 REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
-    'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser'],
+    'DEFAULT_PARSER_CLASSES': [
+        'rest_framework.parsers.JSONParser',
+        'rest_framework.parsers.MultiPartParser',  # audio upload for speech-to-text
+    ],
+}
+
+# Next.js dev server origin
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+
+# Logging — console for live tailing during the demo, plus a rolling file so
+# a failed run can be read back afterwards. paytrail.* loggers carry the
+# agent loop, every tool dispatch, and raw Sarvam request/response detail.
+
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{asctime} {levelname:<7} {name:<28} {message}",
+            "style": "{",
+            "datefmt": "%H:%M:%S",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+            "level": "DEBUG",
+        },
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOG_DIR / "paytrail.log",
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 3,
+            "formatter": "verbose",
+            "level": "DEBUG",
+            "encoding": "utf-8",
+        },
+    },
+    "loggers": {
+        "paytrail": {
+            "handlers": ["console", "file"],
+            "level": os.environ.get("PAYTRAIL_LOG_LEVEL", "DEBUG"),
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console", "file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+    },
 }
 
 
@@ -156,6 +215,7 @@ REST_FRAMEWORK = {
 
 SARVAM_API_KEY = os.environ.get("SARVAM_API_KEY", "")
 SARVAM_MODEL_ID = os.environ.get("SARVAM_MODEL_ID", "sarvam-105b")
+SARVAM_STT_MODEL_ID = os.environ.get("SARVAM_STT_MODEL_ID", "saarika:v2.5")
 SARVAM_BASE_URL = os.environ.get("SARVAM_BASE_URL", "https://api.sarvam.ai")
 AGENT_MAX_TOOL_ROUNDS = int(os.environ.get("AGENT_MAX_TOOL_ROUNDS", "8"))
 KNOWLEDGE_BASE_DIR = BASE_DIR / "knowledge_base"

@@ -1,12 +1,20 @@
+import logging
+
+from rest_framework import status
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from agent.agent_loop import run_turn
+from agent.errors import ToolError
 from agent.models import ToolExecution
+from agent.sarvam_client import speech_to_text
 from support.models import SupportCase
 from support.services import case_to_dict, get_case
 
 from .serializers import AgentMessageRequestSerializer
+
+logger = logging.getLogger("paytrail.api")
 
 
 class AgentMessageView(APIView):
@@ -20,10 +28,18 @@ class AgentMessageView(APIView):
         serializer = AgentMessageRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        result = run_turn(
-            conversation=serializer.validated_data.get("conversation", []),
-            merchant_message=serializer.validated_data["message"],
-        )
+        message = serializer.validated_data["message"]
+        logger.info("POST /message/ message=%r", message)
+        try:
+            result = run_turn(
+                conversation=serializer.validated_data.get("conversation", []),
+                merchant_message=message,
+            )
+        except ToolError as exc:
+            # Sarvam unreachable / misconfigured — return a clean 502 rather
+            # than a 500 HTML page the frontend can't parse.
+            logger.error("agent turn failed: %s", exc)
+            return Response({"error": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
         return Response(
             {
                 "final_message": result["final_message"],
@@ -31,6 +47,32 @@ class AgentMessageView(APIView):
                 "conversation": result["messages"][1:],  # drop the system prompt
             }
         )
+
+
+class TranscribeView(APIView):
+    """POST an audio file -> Sarvam speech-to-text -> {"transcript": "..."}.
+
+    Transcription only. The caller then sends the transcript to /message/ like
+    any typed message, so speech and text converge on the same agent loop.
+    """
+
+    parser_classes = [MultiPartParser]
+    MAX_AUDIO_BYTES = 10 * 1024 * 1024
+
+    def post(self, request):
+        audio = request.FILES.get("audio")
+        if audio is None:
+            return Response({"error": "No audio file supplied."}, status=status.HTTP_400_BAD_REQUEST)
+        if audio.size > self.MAX_AUDIO_BYTES:
+            return Response({"error": "Audio file too large."}, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.info("POST /transcribe/ filename=%s bytes=%d", audio.name, audio.size)
+        try:
+            transcript = speech_to_text(audio.read(), filename=audio.name or "audio.webm")
+        except ToolError as exc:
+            logger.error("transcription failed: %s", exc)
+            return Response({"error": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"transcript": transcript})
 
 
 class CaseDetailView(APIView):
@@ -68,6 +110,7 @@ class CaseDetailView(APIView):
                         "tool_name": t.tool_name,
                         "ok": t.ok,
                         "error_code": t.error_code,
+                        "result": t.result,
                         "created_at": t.created_at.isoformat(),
                     }
                     for t in ToolExecution.objects.filter(case=case).order_by("created_at")
