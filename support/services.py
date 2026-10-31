@@ -110,36 +110,36 @@ def manage_case(
     if operation == "GET_STATUS":
         return case_to_dict(case)
 
-    if operation == "ADD_NOTE":
-        if not note:
-            raise ToolInputError("ADD_NOTE requires note.")
+    if operation not in ("ADD_NOTE", "ASSIGN", "UPDATE"):
+        raise ToolInputError(f"Unsupported operation={operation!r}.")
+
+    # Each operation has its own required field, but all three apply the same
+    # optional fields if present — the tool schema lets the model send e.g. a
+    # note AND a status transition in one ADD_NOTE call (a real escalation
+    # note plus target_status=ESCALATED is the obvious, expected usage), and
+    # silently dropping the fields an operation doesn't "own" is what broke
+    # this exact case: an escalation note landed, but the status never moved.
+    if operation == "ADD_NOTE" and not note:
+        raise ToolInputError("ADD_NOTE requires note.")
+    if operation == "ASSIGN" and not assigned_team:
+        raise ToolInputError("ASSIGN requires assigned_team.")
+
+    if note:
         SupportCaseNote.objects.create(case=case, note=note)
-        return case_to_dict(case)
-
-    if operation == "ASSIGN":
-        if not assigned_team:
-            raise ToolInputError("ASSIGN requires assigned_team.")
+    if assigned_team is not None:
         case.assigned_team = assigned_team
-        if target_status:
-            transition_status(case, target_status)
-        case.save()
-        return case_to_dict(case)
-
-    if operation == "UPDATE":
-        if summary is not None:
-            case.summary = summary
-        if details is not None:
-            case.details = details
-        if priority is not None:
-            case.priority = priority
-        if evidence_refs:
-            case.evidence_refs = list({*case.evidence_refs, *evidence_refs})
-        if target_status:
-            transition_status(case, target_status)
-        case.save()
-        return case_to_dict(case)
-
-    raise ToolInputError(f"Unsupported operation={operation!r}.")
+    if summary is not None:
+        case.summary = summary
+    if details is not None:
+        case.details = details
+    if priority is not None:
+        case.priority = priority
+    if evidence_refs:
+        case.evidence_refs = list({*case.evidence_refs, *evidence_refs})
+    if target_status:
+        transition_status(case, target_status)
+    case.save()
+    return case_to_dict(case)
 
 
 def transition_status(case: SupportCase, target_status: str) -> None:
