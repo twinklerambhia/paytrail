@@ -207,7 +207,10 @@ TOOL_SCHEMAS = [
                     "language": {"type": "string", "enum": ["en", "hi", "mr"]},
                     "message": {"type": "string", "description": "Concise, clear merchant-facing message."},
                     "message_type": {"type": "string", "enum": ["PROGRESS", "RESOLUTION", "ESCALATION"]},
-                    "verification_id": {"type": ["string", "null"], "description": "Verification record supporting a resolution claim, if applicable."},
+                    "verification_id": {
+                        "type": ["string", "null"],
+                        "description": "Required for message_type=RESOLUTION. Use the exact verification_id field from a prior verify_case_outcome result on this case where verification_status was VERIFIED and issue_resolved was true. Never guess or reuse an unrelated id such as a request_id.",
+                    },
                 },
                 "required": ["case_id", "language", "message", "message_type"],
             },

@@ -100,7 +100,7 @@ def verify_case_outcome(
             list(latest_other.mismatches),
         )
 
-    record_verification(
+    record = record_verification(
         case=case,
         verification_scope=verification_scope,
         expected_outcome=expected_outcome,
@@ -125,6 +125,11 @@ def verify_case_outcome(
 
     return {
         "case_id": case.case_id,
+        # The record this verification run just wrote. notify_merchant's
+        # RESOLUTION path requires this exact id — without it the model has
+        # no legitimate value to pass and has been observed guessing a
+        # request_id instead, which never matches anything.
+        "verification_id": record.pk,
         "action_id": action_id,
         "verification_scope": verification_scope,
         "verification_status": status,
