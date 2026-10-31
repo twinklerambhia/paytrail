@@ -1,10 +1,15 @@
 from agent.envelope import now_iso
-from agent.errors import InsufficientEvidenceError, RecordNotFoundError, ToolInputError
+from agent.errors import (
+    InsufficientEvidenceError,
+    InvalidStateTransitionError,
+    RecordNotFoundError,
+    ToolInputError,
+)
 from devices import services as device_services
 from devices.models import DeviceAction
 from payments.services import resolve_transaction
 from support.models import VerificationRecord
-from support.services import get_case, record_verification
+from support.services import get_case, record_verification, transition_status
 
 VStatus = VerificationRecord.VerificationStatus
 SCOPE_SOURCE = {
@@ -111,6 +116,23 @@ def verify_case_outcome(
     )
 
     resolution_transition_allowed = status == VStatus.VERIFIED and issue_resolved
+    case_auto_resolved = False
+    if resolution_transition_allowed and case.status not in ("RESOLVED", "CLOSED"):
+        # Observed live: the model gets a VERIFIED+resolved result, says so to
+        # the merchant, and simply never makes the separate manage_support_case
+        # call to actually transition the case - it sits at OPEN forever with
+        # no signal a human (or anything else) should close it. Applying the
+        # same gate manage_support_case uses (transition_status, which already
+        # requires VERIFIED+issue_resolved) here means the backend-enforced
+        # rule actually takes effect regardless of whether a follow-up call
+        # happens, instead of depending on it.
+        try:
+            transition_status(case, "RESOLVED")
+            case.save()
+            case_auto_resolved = True
+        except InvalidStateTransitionError:
+            pass  # e.g. case currently AWAITING_APPROVAL; leave it for manage_support_case to sort out
+
     if resolution_transition_allowed:
         recommended_next_step = "CLOSE_AS_RESOLVED"
     elif status == VStatus.FAILED:
@@ -130,6 +152,8 @@ def verify_case_outcome(
         # no legitimate value to pass and has been observed guessing a
         # request_id instead, which never matches anything.
         "verification_id": record.pk,
+        "case_status": case.status,
+        "case_auto_resolved": case_auto_resolved,
         "action_id": action_id,
         "verification_scope": verification_scope,
         "verification_status": status,
