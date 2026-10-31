@@ -6,6 +6,8 @@ one ToolExecution audit row per call regardless of which tool ran or whether
 it succeeded.
 """
 
+import logging
+
 from .envelope import build_error, build_success, new_request_id
 from .errors import ToolInputError
 from .tools.case_management import manage_support_case
@@ -14,6 +16,8 @@ from .tools.investigation import investigate_payment_case
 from .tools.knowledge import search_support_knowledge
 from .tools.notification import notify_merchant
 from .tools.verification import verify_case_outcome
+
+logger = logging.getLogger("paytrail.tools")
 
 TOOL_REGISTRY = {
     "investigate_payment_case": investigate_payment_case,
@@ -39,6 +43,7 @@ def dispatch(tool_name: str, arguments: dict) -> dict:
 
     request_id = new_request_id()
     func = TOOL_REGISTRY.get(tool_name)
+    logger.info("[%s] CALL %s args=%s", request_id, tool_name, arguments)
 
     if func is None:
         envelope = build_error(ToolInputError(f"Unknown tool {tool_name!r}."), tool_name, request_id)
@@ -46,6 +51,7 @@ def dispatch(tool_name: str, arguments: dict) -> dict:
         try:
             data = func(**arguments)
             envelope = build_success(data, tool_name, request_id)
+            logger.info("[%s] OK   %s -> %s", request_id, tool_name, data)
         except TypeError as exc:
             envelope = build_error(
                 ToolInputError(f"Invalid arguments for {tool_name}: {exc}"), tool_name, request_id

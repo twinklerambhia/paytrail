@@ -1,9 +1,12 @@
 """Common ok/data/error/meta result envelope shared by every agent tool."""
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from .errors import ToolError
+
+logger = logging.getLogger("paytrail.envelope")
 
 
 def new_request_id() -> str:
@@ -30,9 +33,12 @@ def build_success(data: dict, tool_name: str, request_id: str) -> dict:
 def build_error(exc: Exception, tool_name: str, request_id: str) -> dict:
     if isinstance(exc, ToolError):
         code, message, retryable = exc.code, str(exc) or exc.__class__.__name__, exc.retryable
+        logger.warning("[%s] %s -> %s: %s", request_id, tool_name, code, message)
     else:
-        # Never leak raw exception/traceback detail to the model.
+        # The model gets a safe generic message; the real traceback goes to
+        # the server log, never into the tool result.
         code, message, retryable = "INTERNAL_ERROR", "An internal error occurred.", False
+        logger.exception("[%s] %s raised an unhandled exception", request_id, tool_name)
     return {
         "ok": False,
         "data": None,
