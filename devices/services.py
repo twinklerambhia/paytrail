@@ -84,6 +84,23 @@ def execute_action(
     if existing is not None:
         return _action_to_dict(existing)
 
+    if action == "RESTART_DEVICE":
+        tried_lighter_action = DeviceAction.objects.filter(
+            device=device, action__in=["CONNECTIVITY_CHECK", "REFRESH_DEVICE_STATUS"]
+        ).exists()
+        if not tried_lighter_action:
+            # Backend-enforced prerequisite, not a prompting suggestion: a
+            # model reliably reaches for RESTART_DEVICE first in practice
+            # (observed across live runs) despite the SOP and system prompt
+            # both saying to try the no-approval actions first. This makes
+            # it structurally impossible to skip them, and the agent sees
+            # this error mid-loop and can self-correct in the same turn.
+            raise PolicyDeniedError(
+                "RESTART_DEVICE requires a prior CONNECTIVITY_CHECK or "
+                "REFRESH_DEVICE_STATUS attempt on this device first — "
+                "neither needs approval and either may resolve this without a restart."
+            )
+
     if action in ACTIONS_REQUIRING_APPROVAL:
         # Not an error: a valid outcome the agent must report as unexecuted,
         # never as "done". No DeviceAction row — nothing ran yet.
@@ -108,19 +125,26 @@ def execute_action(
         )
 
     # Deterministic, seed-controlled simulation — never a real device call.
-    if action == "CONNECTIVITY_CHECK":
+    # recovers_on_check fires on either no-approval diagnostic action, not
+    # just CONNECTIVITY_CHECK: a model reliably reaches for REFRESH_DEVICE_
+    # STATUS or RESTART_DEVICE instead (observed via live runs), and the
+    # recovery path must not be reachable only through one specific tool
+    # name the model may never pick. RESTART_DEVICE stays approval-gated
+    # regardless - it's the one action the brief says may require a human.
+    if action in ("CONNECTIVITY_CHECK", "REFRESH_DEVICE_STATUS"):
         if device.recovers_on_check and not device.online:
             device.online = True
             device.network_status = "CONNECTED"
             device.last_seen = timezone.now()
             device.save(update_fields=["online", "network_status", "last_seen"])
-        reachable = device.online
-        result = {
-            "device_reachable": reachable,
-            "error_code": None if reachable else "DEVICE_UNREACHABLE",
-        }
-    elif action == "REFRESH_DEVICE_STATUS":
-        result = {"online": device.online, "network_status": device.network_status}
+        if action == "CONNECTIVITY_CHECK":
+            reachable = device.online
+            result = {
+                "device_reachable": reachable,
+                "error_code": None if reachable else "DEVICE_UNREACHABLE",
+            }
+        else:
+            result = {"online": device.online, "network_status": device.network_status}
     else:  # RETRY_NOTIFICATION, device already confirmed online above
         result = {"notification_retried": True}
 
