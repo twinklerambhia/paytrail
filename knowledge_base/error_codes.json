@@ -1,0 +1,27 @@
+{
+  "DEVICE_UNREACHABLE": {
+    "meaning": "The Soundbox could not be reached to deliver a payment notification or respond to a diagnostic.",
+    "issue_type": "soundbox_no_alert",
+    "recommended_action": "Run a CONNECTIVITY_CHECK; if still unreachable, escalate to DEVICE_SUPPORT."
+  },
+  "NOTIFICATION_TIMEOUT": {
+    "meaning": "The notification request to the device timed out before confirmation.",
+    "issue_type": "soundbox_no_alert",
+    "recommended_action": "Confirm device is online, then retry the notification once."
+  },
+  "BANK_DECLINE": {
+    "meaning": "The issuing bank declined the payment at authorization.",
+    "issue_type": "payment_failed",
+    "recommended_action": "Explain the platform-confirmed decline; bank-side reason is not visible to PayTrail."
+  },
+  "INSUFFICIENT_FUNDS": {
+    "meaning": "The payment was declined due to insufficient balance at the issuing bank.",
+    "issue_type": "payment_failed",
+    "recommended_action": "Explain the confirmed decline reason; no retry or refund action is available."
+  },
+  "GATEWAY_TIMEOUT": {
+    "meaning": "The payment gateway did not respond within the expected window, resulting in a failed transaction.",
+    "issue_type": "payment_failed",
+    "recommended_action": "Explain the platform-confirmed failure; escalate if the merchant reports a customer-side deduction."
+  }
+}
