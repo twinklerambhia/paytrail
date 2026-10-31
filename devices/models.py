@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 from merchants.models import Merchant
 
@@ -43,7 +44,10 @@ class DeviceAction(models.Model):
     result = models.JSONField(default=dict)
     approval_required = models.BooleanField(default=False)
     approval_status = models.CharField(max_length=20, null=True, blank=True)
-    executed_at = models.DateTimeField(auto_now_add=True)
+    # Plain default (not auto_now_add) so seed data can backdate realistic
+    # timestamps for pre-populated case history; real executions still get
+    # "now" since the service layer never passes executed_at explicitly.
+    executed_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self) -> str:
         return f"{self.action_id} ({self.action} / {self.execution_status})"
