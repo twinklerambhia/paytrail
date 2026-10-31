@@ -133,6 +133,23 @@ export default function Dashboard() {
   const verification = detail?.verifications?.[0];
   const investigate = executions.find((t) => t.tool_name === "investigate_payment_case" && t.ok);
 
+  // investigate_payment_case only captures device state at the moment of
+  // investigation — a later execute_device_action/inspect_device call can
+  // bring the device back online, but the Evidence card kept showing the
+  // stale "offline" snapshot from the first call. Use whichever ran last.
+  let latestDeviceOnline: boolean | undefined;
+  for (const t of executions) {
+    if (!t.ok || !t.result) continue;
+    if (t.tool_name === "execute_device_action") {
+      const inner = t.result.result as Record<string, any> | null;
+      if (inner && "device_reachable" in inner) latestDeviceOnline = inner.device_reachable;
+      else if (inner && "online" in inner) latestDeviceOnline = inner.online;
+    } else if (t.tool_name === "inspect_device") {
+      const connectivity = t.result.connectivity as Record<string, any> | undefined;
+      if (connectivity && "online" in connectivity) latestDeviceOnline = connectivity.online;
+    }
+  }
+
   const caseKind: Kind = caseRecord ? STATUS_KIND[caseRecord.status] ?? "warn" : "warn";
 
   return (
@@ -400,7 +417,8 @@ export default function Dashboard() {
                             : txn.status,
                       });
                     }
-                    if (device) rows.push({ label: "Device", value: device.online ? "online" : "offline" });
+                    const deviceOnline = latestDeviceOnline !== undefined ? latestDeviceOnline : device?.online;
+                    if (deviceOnline !== undefined) rows.push({ label: "Device", value: deviceOnline ? "online" : "offline" });
                     return rows.map((row) => (
                       <div
                         key={row.label}
