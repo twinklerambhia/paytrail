@@ -18,16 +18,17 @@ logger = logging.getLogger("paytrail.agent")
 
 
 def _backfill_case_link(case_id: str, request_ids: list[str]) -> None:
-    """Retroactively attach this turn's pre-case tool calls to the case they informed.
+    """Retroactively attach every still-unlinked tool call of this turn to its case.
 
     investigate_payment_case, search_support_knowledge and inspect_device
-    have no case_id argument — a case doesn't exist yet when they run, that's
-    correct. But it means tool_registry.dispatch's case-FK linking (by
-    arguments["case_id"]) always leaves them unlinked, so a case's dashboard
-    timeline silently started at the first post-creation action, making a
-    thoroughly-investigated case look like evidence was skipped. Everything
-    dispatched earlier in this same turn, still unlinked, belongs to the case
-    this turn just created.
+    have no case_id argument at all — not because a case doesn't exist yet,
+    but by design (search/inspect are correlated by transaction/device, not
+    case). tool_registry.dispatch's case-FK linking (by arguments["case_id"])
+    always leaves them unlinked regardless of when in the turn they run,
+    before OR after the case is created — a case's dashboard timeline looked
+    like evidence was skipped even when search_support_knowledge/inspect_device
+    ran right after case creation. This runs once at the true end of the
+    turn (not the moment CREATE succeeds) so it catches calls on both sides.
     """
     from agent.models import ToolExecution
     from support.models import SupportCase
@@ -67,6 +68,7 @@ def stream_turn(conversation: list[dict], merchant_message: str):
     ]
     tool_call_count = 0
     turn_request_ids: list[str] = []
+    case_id_for_turn: str | None = None
     logger.info("TURN START merchant_message=%r (history=%d msgs)", merchant_message, len(conversation))
 
     for round_number in range(1, settings.AGENT_MAX_TOOL_ROUNDS + 1):
@@ -87,6 +89,8 @@ def stream_turn(conversation: list[dict], merchant_message: str):
         if not tool_calls:
             final = message.get("content", "")
             logger.info("TURN END after %d round(s), %d tool call(s)", round_number, tool_call_count)
+            if case_id_for_turn:
+                _backfill_case_link(case_id_for_turn, turn_request_ids)
             yield {"type": "final", "final_message": final, "messages": messages}
             return
 
@@ -106,8 +110,8 @@ def stream_turn(conversation: list[dict], merchant_message: str):
                 {"role": "tool", "tool_call_id": call["id"], "content": json.dumps(envelope)}
             )
 
-            if envelope["ok"] and name == "manage_support_case" and envelope["data"].get("operation") == "CREATE":
-                _backfill_case_link(envelope["data"]["case_id"], turn_request_ids)
+            if envelope["ok"] and envelope["data"] and envelope["data"].get("case_id"):
+                case_id_for_turn = envelope["data"]["case_id"]
 
             yield {"type": "tool_result", "tool_name": name, "arguments": arguments, "result": envelope}
 
@@ -116,6 +120,8 @@ def stream_turn(conversation: list[dict], merchant_message: str):
         settings.AGENT_MAX_TOOL_ROUNDS,
         tool_call_count,
     )
+    if case_id_for_turn:
+        _backfill_case_link(case_id_for_turn, turn_request_ids)
     # ponytail: loop-limit fallback is a static message, not an auto-escalation
     # case. Good enough for the demo; wire manage_support_case(ESCALATE) here
     # if a scripted case ever actually hits 8 rounds.
