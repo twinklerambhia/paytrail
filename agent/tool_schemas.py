@@ -170,8 +170,11 @@ TOOL_SCHEMAS = [
                 "Independently verify whether an action executed and whether the merchant's "
                 "original issue is resolved. Re-read relevant current state and compare it with "
                 "the expected observable outcome. Do not trust an agent claim or an action's "
-                "COMPLETED status alone. Return evidence and a verification assessment; the backend "
-                "controls whether the case may be marked RESOLVED."
+                "COMPLETED status alone. If the result is VERIFIED with issue_resolved true, the "
+                "backend transitions the case to RESOLVED automatically as part of this call (see "
+                "case_status/case_auto_resolved in the result) — do not call manage_support_case "
+                "again just to set that status. Follow up with notify_merchant using "
+                "message_type=RESOLUTION and the returned verification_id."
             ),
             "parameters": {
                 "type": "object",
