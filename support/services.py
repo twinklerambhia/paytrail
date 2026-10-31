@@ -11,6 +11,21 @@ from .models import SupportCase, SupportCaseNote, VerificationRecord
 
 Status = SupportCase.Status
 
+# Mirrors knowledge_base/escalation_policy.md's "Team routing" table. The
+# model is supposed to pass assigned_team on escalation but has been
+# observed (confirmed via live tool-call logs) reliably forgetting it while
+# still setting target_status=ESCALATED. Relying on an LLM to remember a
+# field every time is fragile; the backend is the authority here, so a case
+# transitioning to ESCALATED with no team gets routed deterministically.
+DEFAULT_ESCALATION_TEAM: dict[str, str] = {
+    SupportCase.IssueType.SOUNDBOX_NO_ALERT: "DEVICE_SUPPORT",
+    SupportCase.IssueType.PENDING_PAYMENT: "PAYMENTS_OPS",
+    SupportCase.IssueType.PAYMENT_FAILED: "PAYMENTS_OPS",
+    SupportCase.IssueType.PAYMENT_STATUS_DISPUTE: "PAYMENTS_OPS",
+    SupportCase.IssueType.SETTLEMENT_QUERY: "PAYMENTS_OPS",
+    SupportCase.IssueType.UNKNOWN: "GENERAL_SUPPORT",
+}
+
 # Terminal states have no outgoing transitions. RESOLVED is only reachable
 # when get_latest_verification() shows VERIFIED + issue_resolved=True — that
 # check happens in transition_status(), not here.
@@ -156,3 +171,5 @@ def transition_status(case: SupportCase, target_status: str) -> None:
                 "RESOLVED requires a VerificationRecord with status=VERIFIED and issue_resolved=True."
             )
     case.status = target_status
+    if target_status == Status.ESCALATED and not case.assigned_team:
+        case.assigned_team = DEFAULT_ESCALATION_TEAM.get(case.issue_type, "GENERAL_SUPPORT")
