@@ -49,17 +49,23 @@ def _clean(message: dict) -> dict:
     return {key: value for key, value in message.items() if value is not None}
 
 
-def run_turn(conversation: list[dict], merchant_message: str) -> dict:
-    """conversation: prior {role, content} messages, not including merchant_message.
+def stream_turn(conversation: list[dict], merchant_message: str):
+    """Generator core of the agent loop — yields one event per tool call as it
+    completes, then one final event, so a caller (the streaming API view) can
+    forward progress to the merchant live instead of after the whole bounded
+    loop finishes. run_turn() below is a non-streaming wrapper around this for
+    callers that just want the end result (scripts/cli_chat.py).
 
-    Returns {"final_message": str, "messages": full updated transcript, "tool_trace": [...]}.
+    Yields:
+      {"type": "tool_result", "tool_name": str, "arguments": dict, "result": envelope}
+      {"type": "final", "final_message": str, "messages": full transcript incl. system prompt}
     """
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         *(_clean(m) for m in conversation),
         {"role": "user", "content": merchant_message},
     ]
-    tool_trace: list[dict] = []
+    tool_call_count = 0
     turn_request_ids: list[str] = []
     logger.info("TURN START merchant_message=%r (history=%d msgs)", merchant_message, len(conversation))
 
@@ -80,8 +86,9 @@ def run_turn(conversation: list[dict], merchant_message: str) -> dict:
 
         if not tool_calls:
             final = message.get("content", "")
-            logger.info("TURN END after %d round(s), %d tool call(s)", round_number, len(tool_trace))
-            return {"final_message": final, "messages": messages, "tool_trace": tool_trace}
+            logger.info("TURN END after %d round(s), %d tool call(s)", round_number, tool_call_count)
+            yield {"type": "final", "final_message": final, "messages": messages}
+            return
 
         for call in tool_calls:
             name = call["function"]["name"]
@@ -94,7 +101,7 @@ def run_turn(conversation: list[dict], merchant_message: str) -> dict:
 
             envelope = dispatch(name, arguments)
             turn_request_ids.append(envelope["meta"]["request_id"])
-            tool_trace.append({"tool_name": name, "arguments": arguments, "result": envelope})
+            tool_call_count += 1
             messages.append(
                 {"role": "tool", "tool_call_id": call["id"], "content": json.dumps(envelope)}
             )
@@ -102,19 +109,41 @@ def run_turn(conversation: list[dict], merchant_message: str) -> dict:
             if envelope["ok"] and name == "manage_support_case" and envelope["data"].get("operation") == "CREATE":
                 _backfill_case_link(envelope["data"]["case_id"], turn_request_ids)
 
+            yield {"type": "tool_result", "tool_name": name, "arguments": arguments, "result": envelope}
+
     logger.warning(
         "TURN HIT ROUND LIMIT (%d) with %d tool call(s) — handing off",
         settings.AGENT_MAX_TOOL_ROUNDS,
-        len(tool_trace),
+        tool_call_count,
     )
     # ponytail: loop-limit fallback is a static message, not an auto-escalation
     # case. Good enough for the demo; wire manage_support_case(ESCALATE) here
     # if a scripted case ever actually hits 8 rounds.
-    return {
+    yield {
+        "type": "final",
         "final_message": (
             "I've reached my investigation limit for this turn. Handing this off "
             "to a human teammate with the evidence gathered so far."
         ),
         "messages": messages,
+    }
+
+
+def run_turn(conversation: list[dict], merchant_message: str) -> dict:
+    """Non-streaming wrapper around stream_turn(). Returns
+    {"final_message": str, "messages": full updated transcript, "tool_trace": [...]}.
+    """
+    tool_trace: list[dict] = []
+    final_event: dict = {}
+    for event in stream_turn(conversation, merchant_message):
+        if event["type"] == "tool_result":
+            tool_trace.append(
+                {"tool_name": event["tool_name"], "arguments": event["arguments"], "result": event["result"]}
+            )
+        else:
+            final_event = event
+    return {
+        "final_message": final_event["final_message"],
+        "messages": final_event["messages"],
         "tool_trace": tool_trace,
     }

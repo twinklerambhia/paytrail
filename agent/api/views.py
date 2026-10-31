@@ -1,11 +1,13 @@
+import json
 import logging
 
+from django.http import StreamingHttpResponse
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from agent.agent_loop import run_turn
+from agent.agent_loop import run_turn, stream_turn
 from agent.errors import ToolError
 from agent.models import ToolExecution
 from agent.sarvam_client import speech_to_text
@@ -47,6 +49,48 @@ class AgentMessageView(APIView):
                 "conversation": result["messages"][1:],  # drop the system prompt
             }
         )
+
+
+class AgentMessageStreamView(APIView):
+    """POST {message, conversation} -> Server-Sent Events, one event per tool
+    call as it completes, then a final event.
+
+    The non-streaming /message/ above still exists (unused by the web client
+    now, kept for anything scripted against it) — this is what the merchant
+    chat UI actually calls, so the investigation timeline appears live
+    instead of appearing all at once after the whole turn finishes.
+
+    Event shapes (each one line, "data: <json>\\n\\n"):
+      {"type": "tool_result", "tool_name", "arguments", "result"}
+      {"type": "final", "final_message", "conversation"}
+      {"type": "error", "error"}
+    """
+
+    def post(self, request):
+        serializer = AgentMessageRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        message = serializer.validated_data["message"]
+        conversation = serializer.validated_data.get("conversation", [])
+        logger.info("POST /message/stream/ message=%r", message)
+
+        def event_stream():
+            try:
+                for event in stream_turn(conversation, message):
+                    if event["type"] == "final":
+                        event = {
+                            "type": "final",
+                            "final_message": event["final_message"],
+                            "conversation": event["messages"][1:],  # drop the system prompt
+                        }
+                    yield f"data: {json.dumps(event)}\n\n"
+            except ToolError as exc:
+                logger.error("agent turn failed: %s", exc)
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+
+        response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
 
 
 class TranscribeView(APIView):
