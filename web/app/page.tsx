@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
 import {
   Check,
   DoubleCheck,
@@ -411,8 +412,9 @@ export default function MerchantChat() {
                         lineHeight: 1.55,
                         boxShadow: "0 8px 20px rgba(0,0,0,0.18)",
                       }}
+                      className="agentMarkdown"
                     >
-                      {entry.text}
+                      <ReactMarkdown>{entry.text}</ReactMarkdown>
                     </div>
                     <div style={{ fontSize: 10.5, color: "var(--text-faint)", marginTop: 4, marginLeft: 3 }}>{entry.time}</div>
                   </div>

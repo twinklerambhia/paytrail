@@ -49,6 +49,29 @@ svg {
   display: block;
 }
 
+.agentMarkdown p {
+  margin: 0 0 8px 0;
+}
+
+.agentMarkdown p:last-child {
+  margin-bottom: 0;
+}
+
+.agentMarkdown strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.agentMarkdown ul,
+.agentMarkdown ol {
+  margin: 4px 0 8px 0;
+  padding-left: 20px;
+}
+
+.agentMarkdown li {
+  margin-bottom: 3px;
+}
+
 .mono {
   font-family: var(--font-mono), ui-monospace, monospace;
 }
