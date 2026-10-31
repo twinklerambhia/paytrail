@@ -30,6 +30,11 @@ export type AgentResponse = {
   conversation: ConversationMessage[];
 };
 
+export type StreamEvent =
+  | { type: "tool_result"; tool_name: string; arguments: Record<string, unknown>; result: ToolEnvelope }
+  | { type: "final"; final_message: string; conversation: ConversationMessage[] }
+  | { type: "error"; error: string };
+
 export type CaseSummary = {
   case_id: string;
   merchant_id: string;
@@ -89,6 +94,49 @@ export async function sendMessage(
     body: JSON.stringify({ message, conversation }),
   });
   return asJson<AgentResponse>(response);
+}
+
+/**
+ * Streams one agent turn via SSE: one "tool_result" event per completed tool
+ * call, arriving as the agent loop produces them, then a "final" event — not
+ * one blocking response after the whole bounded loop finishes. EventSource
+ * can't do POST with a body, so this reads the fetch Response stream by hand
+ * and splits on SSE "data: ...\n\n" framing.
+ */
+export async function sendMessageStream(
+  message: string,
+  conversation: ConversationMessage[],
+  onEvent: (event: StreamEvent) => void,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/message/stream/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, conversation }),
+  });
+  if (!response.ok || !response.body) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`${response.status}: ${body.slice(0, 300)}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      const line = frame.trim();
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice("data:".length).trim();
+      if (!payload) continue;
+      onEvent(JSON.parse(payload) as StreamEvent);
+    }
+  }
 }
 
 export async function transcribe(audio: Blob): Promise<string> {

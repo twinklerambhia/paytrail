@@ -11,7 +11,7 @@ import {
   Stop,
 } from "@/components/Icons";
 import {
-  sendMessage,
+  sendMessageStream,
   transcribe,
   type ConversationMessage,
   type ToolTraceStep,
@@ -118,19 +118,24 @@ export default function MerchantChat() {
     setBusy(true);
     setEntries((prev) => [...prev, { role: "merchant", text: message, time: nowLabel() }]);
     try {
-      const result = await sendMessage(message, conversation);
-      setConversation(result.conversation);
-      setStatus((prev) => deriveStatus(prev, result.tool_trace));
-      const progress: Entry[] = result.tool_trace.map((step) => ({
-        role: "progress",
-        text: FRIENDLY_TOOL_LABELS[step.tool_name] ?? step.tool_name,
-        ok: step.result.ok,
-      }));
-      setEntries((prev) => [
-        ...prev,
-        ...progress,
-        { role: "agent", text: result.final_message, time: nowLabel() },
-      ]);
+      // Streamed: each progress line and the status strip update live, the
+      // moment that specific tool call finishes — not held back until the
+      // whole bounded loop completes.
+      await sendMessageStream(message, conversation, (event) => {
+        if (event.type === "tool_result") {
+          const step: ToolTraceStep = { tool_name: event.tool_name, arguments: event.arguments, result: event.result };
+          setStatus((prev) => deriveStatus(prev, [step]));
+          setEntries((prev) => [
+            ...prev,
+            { role: "progress", text: FRIENDLY_TOOL_LABELS[event.tool_name] ?? event.tool_name, ok: event.result.ok },
+          ]);
+        } else if (event.type === "final") {
+          setConversation(event.conversation);
+          setEntries((prev) => [...prev, { role: "agent", text: event.final_message, time: nowLabel() }]);
+        } else {
+          setEntries((prev) => [...prev, { role: "error", text: `Agent error: ${event.error}` }]);
+        }
+      });
     } catch (error) {
       setEntries((prev) => [
         ...prev,
