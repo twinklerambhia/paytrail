@@ -6,6 +6,12 @@ from agent.errors import PolicyDeniedError, RecordNotFoundError, ToolInputError
 
 from .models import Device, DeviceAction
 
+NOTIFICATION_RETRY_REQUIRES_TRANSACTION = (
+    "RETRY_NOTIFICATION requires transaction_id — the retried alert is tied to "
+    "the specific payment that failed to notify, and verify_case_outcome's "
+    "NOTIFICATION_RECOVERY scope checks that transaction's event log."
+)
+
 # MVP allowlist. RESTART_DEVICE always requires human approval; RETRY_NOTIFICATION
 # requires the device to be currently reachable.
 ALLOWED_ACTIONS = {
@@ -119,10 +125,13 @@ def execute_action(
             "executed_at": None,
         }
 
-    if action == "RETRY_NOTIFICATION" and not device.online:
-        raise PolicyDeniedError(
-            "RETRY_NOTIFICATION requires a reachable device; device is currently offline."
-        )
+    if action == "RETRY_NOTIFICATION":
+        if not device.online:
+            raise PolicyDeniedError(
+                "RETRY_NOTIFICATION requires a reachable device; device is currently offline."
+            )
+        if transaction is None:
+            raise ToolInputError(NOTIFICATION_RETRY_REQUIRES_TRANSACTION)
 
     # Deterministic, seed-controlled simulation — never a real device call.
     # recovers_on_check fires on either no-approval diagnostic action, not
@@ -145,8 +154,17 @@ def execute_action(
             }
         else:
             result = {"online": device.online, "network_status": device.network_status}
-    else:  # RETRY_NOTIFICATION, device already confirmed online above
-        result = {"notification_retried": True}
+    else:  # RETRY_NOTIFICATION, device and transaction already confirmed above
+        from payments.models import TransactionEvent
+
+        TransactionEvent.objects.create(
+            transaction=transaction,
+            event_type="SOUNDBOX_NOTIFICATION",
+            status="SUCCESS",
+            occurred_at=timezone.now(),
+            source="notification_event_log",
+        )
+        result = {"notification_retried": True, "notification_delivered": True}
 
     device_action = DeviceAction.objects.create(
         action_id=f"ACT{uuid.uuid4().hex[:8].upper()}",
