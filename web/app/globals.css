@@ -1,0 +1,118 @@
+/* Design tokens lifted 1:1 from the approved mocks (Main.dc.html / Dashboard.dc.html). */
+:root {
+  --bg: #0b1a2e;
+  --bg-raised: #112542;
+  --bg-card: #15304f;
+  --border: rgba(255, 255, 255, 0.09);
+  --text: #f3f6fa;
+  --text-muted: #8fa3c0;
+  --text-faint: #5f7694;
+  --teal: #2dd4bf;
+  --teal-deep: #06281f;
+  --teal-tint-bg: #d6f5ee;
+  --teal-tint-text: #0a6657;
+  --orange-tint-bg: #3a2a14;
+  --orange-tint-text: #f5b351;
+  --red-tint-bg: #3a1a1e;
+  --red-tint-text: #f29a9a;
+  --blue-tint-bg: #17304f;
+  --blue-tint-text: #8fb3e0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input {
+  font-family: inherit;
+}
+
+svg {
+  display: block;
+}
+
+.mono {
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
+/* ---- shared pieces ---- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+}
+
+.cardLabel {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 14px;
+}
+
+.brandMark {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--teal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  color: var(--teal-deep);
+  font-size: 16px;
+  box-shadow: 0 4px 14px rgba(45, 212, 191, 0.25);
+}
+
+.navLink {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.navLink:hover {
+  color: var(--teal);
+  border-color: var(--teal);
+}
+
+.navLinkActive {
+  background: var(--teal);
+  color: var(--teal-deep);
+  border-color: var(--teal);
+}
