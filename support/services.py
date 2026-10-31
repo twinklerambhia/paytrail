@@ -11,6 +11,21 @@ from .models import SupportCase, SupportCaseNote, VerificationRecord
 
 Status = SupportCase.Status
 
+# Mirrors knowledge_base/escalation_policy.md's "Team routing" table. The
+# model is supposed to pass assigned_team on escalation but has been
+# observed (confirmed via live tool-call logs) reliably forgetting it while
+# still setting target_status=ESCALATED. Relying on an LLM to remember a
+# field every time is fragile; the backend is the authority here, so a case
+# transitioning to ESCALATED with no team gets routed deterministically.
+DEFAULT_ESCALATION_TEAM: dict[str, str] = {
+    SupportCase.IssueType.SOUNDBOX_NO_ALERT: "DEVICE_SUPPORT",
+    SupportCase.IssueType.PENDING_PAYMENT: "PAYMENTS_OPS",
+    SupportCase.IssueType.PAYMENT_FAILED: "PAYMENTS_OPS",
+    SupportCase.IssueType.PAYMENT_STATUS_DISPUTE: "PAYMENTS_OPS",
+    SupportCase.IssueType.SETTLEMENT_QUERY: "PAYMENTS_OPS",
+    SupportCase.IssueType.UNKNOWN: "GENERAL_SUPPORT",
+}
+
 # Terminal states have no outgoing transitions. RESOLVED is only reachable
 # when get_latest_verification() shows VERIFIED + issue_resolved=True — that
 # check happens in transition_status(), not here.
@@ -110,36 +125,36 @@ def manage_case(
     if operation == "GET_STATUS":
         return case_to_dict(case)
 
-    if operation == "ADD_NOTE":
-        if not note:
-            raise ToolInputError("ADD_NOTE requires note.")
+    if operation not in ("ADD_NOTE", "ASSIGN", "UPDATE"):
+        raise ToolInputError(f"Unsupported operation={operation!r}.")
+
+    # Each operation has its own required field, but all three apply the same
+    # optional fields if present — the tool schema lets the model send e.g. a
+    # note AND a status transition in one ADD_NOTE call (a real escalation
+    # note plus target_status=ESCALATED is the obvious, expected usage), and
+    # silently dropping the fields an operation doesn't "own" is what broke
+    # this exact case: an escalation note landed, but the status never moved.
+    if operation == "ADD_NOTE" and not note:
+        raise ToolInputError("ADD_NOTE requires note.")
+    if operation == "ASSIGN" and not assigned_team:
+        raise ToolInputError("ASSIGN requires assigned_team.")
+
+    if note:
         SupportCaseNote.objects.create(case=case, note=note)
-        return case_to_dict(case)
-
-    if operation == "ASSIGN":
-        if not assigned_team:
-            raise ToolInputError("ASSIGN requires assigned_team.")
+    if assigned_team is not None:
         case.assigned_team = assigned_team
-        if target_status:
-            transition_status(case, target_status)
-        case.save()
-        return case_to_dict(case)
-
-    if operation == "UPDATE":
-        if summary is not None:
-            case.summary = summary
-        if details is not None:
-            case.details = details
-        if priority is not None:
-            case.priority = priority
-        if evidence_refs:
-            case.evidence_refs = list({*case.evidence_refs, *evidence_refs})
-        if target_status:
-            transition_status(case, target_status)
-        case.save()
-        return case_to_dict(case)
-
-    raise ToolInputError(f"Unsupported operation={operation!r}.")
+    if summary is not None:
+        case.summary = summary
+    if details is not None:
+        case.details = details
+    if priority is not None:
+        case.priority = priority
+    if evidence_refs:
+        case.evidence_refs = list({*case.evidence_refs, *evidence_refs})
+    if target_status:
+        transition_status(case, target_status)
+    case.save()
+    return case_to_dict(case)
 
 
 def transition_status(case: SupportCase, target_status: str) -> None:
@@ -156,3 +171,5 @@ def transition_status(case: SupportCase, target_status: str) -> None:
                 "RESOLVED requires a VerificationRecord with status=VERIFIED and issue_resolved=True."
             )
     case.status = target_status
+    if target_status == Status.ESCALATED and not case.assigned_team:
+        case.assigned_team = DEFAULT_ESCALATION_TEAM.get(case.issue_type, "GENERAL_SUPPORT")
