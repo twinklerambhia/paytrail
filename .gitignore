@@ -6,3 +6,20 @@ db.sqlite3
 *.log
 .DS_Store
 logs/
+# Next.js
+/web/.next/
+/web/out/
+/web/next-env.d.ts
+
+# Vercel
+/web/.vercel/
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# Node dependencies
+/web/node_modules/
+
+# Environment files
+/web/.env*
+!/web/.env.local.example
